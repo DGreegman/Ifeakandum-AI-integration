@@ -4,7 +4,7 @@ from fastapi import HTTPException
 import httpx
 import os
 from dotenv import load_dotenv
-from schema.patient_schema import MedicalRecords
+from src.schema.patient_schema import AnalysisResult, MedicalRecords
 import logging
 
 logging.basicConfig(level=logging.INFO)

@@ -4,3 +4,7 @@ python-dotenv==1.1.1
 httpx==0.28.1
 pandas==2.3.1
 numpy==2.3.1
+python-multipart==0.0.21
+celery==5.4.0
+redis==5.0.1
+sqlmodel==0.0.22

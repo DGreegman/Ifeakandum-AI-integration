@@ -1,2 +1,28 @@
+# Virtual environments
 .venv/
+venv/
+env/
+
+# Environment variables
 .env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Logs
+*.log
+app.log.*
+celery.log
+uvicorn.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Test files
+test_*.csv
+who_test_*.csv
