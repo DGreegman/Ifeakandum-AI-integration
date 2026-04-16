@@ -1,0 +1,44 @@
+Based on the clinical diagnosis below, provide a complete treatment plan.
+
+PATIENT PROFILE
+---------------
+Age: {{ age }} years | Gender: {{ gender }} | Weight: {{ weight }}kg
+Medical History: {{ medical_history | join(', ') if medical_history else 'None' }}
+Known Allergies: {{ allergies | join(', ') if allergies else 'None' }}
+Current Medications: {{ current_medications | join(', ') if current_medications else 'None' }}
+
+VITAL SIGNS
+-----------
+Temperature: {{ temperature }}°C | BP: {{ blood_pressure or 'N/A' }} | HR: {{ heart_rate or 'N/A' }} bpm | SpO2: {{ oxygen_saturation or 'N/A' }}%
+
+CONFIRMED DIFFERENTIAL DIAGNOSIS (from Diagnostic Agent)
+---------------------------------------------------------
+Suspected Conditions: {{ suspected_conditions | join(', ') }}
+Risk Factors: {{ risk_factors | join(', ') if risk_factors else 'None' }}
+Confidence: {{ confidence_level }}
+Clinical Reasoning: {{ clinical_reasoning }}
+
+TASK
+----
+1. Recommend medications tailored to the confirmed conditions above
+2. CRITICALLY check each medication against patient allergies ({{ allergies | join(', ') if allergies else 'None' }}) and current medications ({{ current_medications | join(', ') if current_medications else 'None' }}) — do NOT recommend contraindicated drugs
+3. Factor in the patient's medical history when selecting dosages
+4. Suggest additional diagnostic tests relevant to confirmed conditions
+
+Respond with ONLY this JSON:
+{
+    "recommended_medications": [
+        {
+            "medication_name": "name",
+            "dosage": "dose",
+            "frequency": "frequency",
+            "duration": "duration",
+            "instructions": "instructions",
+            "contraindications": ["contraindication1"],
+            "side_effects": ["side_effect1"],
+            "confidence_score": 0.90
+        }
+    ],
+    "additional_tests": ["test1", "test2"],
+    "treatment_notes": "Detailed treatment notes. Include: This is for educational/research purposes only. Not for actual medical diagnosis or treatment. Always consult healthcare professionals."
+}

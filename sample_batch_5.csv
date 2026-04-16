@@ -1,0 +1,6 @@
+patient_id,name,age,gender,symptoms,severity,temperature,heart_rate,medical_history,additional_notes
+PT-B2-001,Adaeze Nwosu,34,Female,"Severe headache,blurred vision,nausea",Severe,38.5,102,"Hypertension,Diabetes Type 2","Sudden onset 2 days ago. BP at home reading 160/100."
+PT-B2-002,Chukwuemeka Eze,52,Male,"Chest tightness,shortness of breath,left arm pain",Critical,37.2,115,"Coronary artery disease,Hyperlipidaemia","Woke up with chest pain. Diaphoretic. ECG changes on previous visit."
+PT-B2-003,Fatima Musa,28,Female,"Painful urination,frequent urination,lower abdominal pain",Mild,37.8,80,,"Symptoms started 3 days ago. No prior UTI history."
+PT-B2-004,Olawale Balogun,45,Male,"Persistent cough,night sweats,weight loss,fatigue",Moderate,38.1,92,"Previous TB exposure","Cough for 6 weeks. Lost 5kg in past month. Close contact with confirmed TB case."
+PT-B2-005,Ngozi Okafor,61,Female,"Joint pain,morning stiffness,swollen knees,fatigue",Moderate,37.0,78,"Osteoarthritis","Bilateral knee swelling worse in mornings. Stiffness lasting over an hour."

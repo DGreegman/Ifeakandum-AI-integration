@@ -1,44 +1,52 @@
-import asyncio
-from contextlib import asynccontextmanager
 import io
 import json
 import uuid
 import os
-from datetime import datetime
+from datetime import datetime, date
 from dotenv import load_dotenv
 from typing import List, Dict, Any, Optional
 
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func
 
 from src.database import init_db, engine, get_session
 from src.models import Patient, MedicalRecord, Analysis, BatchStatus, DoctorReport, WHOData
 from src.services.batch_analysis import process_csv_in_chunks
 from src.tasks import analyze_medical_record_task
 from src.schema.patient_schema import AnalysisResult, MedicalRecords, MedicationRecommendation, DoctorReport as DoctorReportSchema
-from src.services.patient_service import deepseek_client, logger
+from src.services.patient_service import openai_client, logger
 from src.middleware import log_request
 
 load_dotenv()
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Initialize DB on startup
-    init_db()
-    yield
+def create_app() -> FastAPI:
+    """Application factory — initialises DB on startup."""
+    async def lifespan(app: FastAPI):
+        init_db()
+        yield
 
-app = FastAPI(
-    title="Medical Records Analysis API",
-    description="AI-powered medical record analysis and medication recommendation system",
-    version="2.0.0",
-    lifespan=lifespan
+    return FastAPI(
+        title="Medical Records Analysis API",
+        description="AI-powered medical record analysis and medication recommendation system",
+        version="2.0.0",
+        lifespan=lifespan,
+    )
+
+app = create_app()
+
+# CORS — wildcard (*) + allow_credentials=True is rejected by browsers.
+# Use explicit origins; override via ALLOWED_ORIGINS env var before deploying.
+_raw_origins = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:3000,http://localhost:5173"
 )
+allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -91,7 +99,7 @@ async def analyze_medical_record(record: MedicalRecords, session: Session = Depe
 
         # 3. Perform AI Analysis (Sync call for single record for simplicity, or queue task)
         # For single record, we'll wait for the AI result
-        ai_analysis = await deepseek_client.analyze_medical_record(record)
+        ai_analysis = await openai_client.analyze_medical_record(record)
 
         # 4. Save Analysis Result
         analysis_result = AnalysisResult(
@@ -124,9 +132,20 @@ async def analyze_medical_record(record: MedicalRecords, session: Session = Depe
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/analysis-result/{patient_id}", response_model=List[AnalysisResult])
-async def get_analysis_result(patient_id: str, session: Session = Depends(get_session)):
-    """Get all analysis results for a specific patient"""
-    statement = select(Analysis).join(MedicalRecord).where(MedicalRecord.patient_id == patient_id)
+async def get_analysis_result(
+    patient_id: str,
+    limit: int = Query(default=20, le=100, description="Max records to return (cap 100)"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
+    session: Session = Depends(get_session),
+):
+    """Get analysis results for a patient (paginated)"""
+    statement = (
+        select(Analysis)
+        .join(MedicalRecord)
+        .where(MedicalRecord.patient_id == patient_id)
+        .offset(offset)
+        .limit(limit)
+    )
     results = session.exec(statement).all()
     
     if not results:
@@ -265,26 +284,41 @@ async def download_batch_results(batch_id: str, fmt: str = "json", session: Sess
     return data
 
 @app.get("/api/v1/doctor-reports/{patient_id}")
-async def get_doctor_reports(patient_id: str, session: Session = Depends(get_session)):
-    """Get all doctor reports for a specific patient"""
-    statement = select(DoctorReport).where(DoctorReport.patient_id == patient_id)
+async def get_doctor_reports(
+    patient_id: str,
+    limit: int = Query(default=20, le=100, description="Max records to return (cap 100)"),
+    offset: int = Query(default=0, ge=0, description="Number of records to skip"),
+    session: Session = Depends(get_session),
+):
+    """Get doctor reports for a patient (paginated)"""
+    statement = (
+        select(DoctorReport)
+        .where(DoctorReport.patient_id == patient_id)
+        .offset(offset)
+        .limit(limit)
+    )
     reports = session.exec(statement).all()
     return reports
 
 @app.post("/api/v1/upload-analyze-csv")
-async def upload_and_analyze_csv(file: UploadFile = File(...)):
-    """Upload CSV file and analyze medical data with Celery background processing"""
-    if not file.filename.endswith('.csv'):
-        raise HTTPException(status_code=400, detail="Only CSV files are supported")
+async def upload_and_analyze_csv(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+):
+    """Upload CSV or JSON file and analyze medical data with background processing"""
+    if not file.filename.endswith(('.csv', '.json')):
+        raise HTTPException(status_code=400, detail="Only CSV or JSON files are supported")
 
     content = await file.read()
     batch_id = str(uuid.uuid4())
-    
-    # Offload to background task (this processes the CSV in chunks and queues Celery tasks)
-    asyncio.create_task(process_csv_in_chunks(content, batch_id))
-    
+
+    # Use FastAPI BackgroundTasks — safe in both sync and async contexts.
+    # asyncio.create_task() would silently drop the task when called outside a
+    # running event loop and is not the right primitive for route handlers.
+    background_tasks.add_task(process_csv_in_chunks, content, batch_id, file.filename)
+
     return {
-        "message": "CSV uploaded. Processing started in background.",
+        "message": "File uploaded. Processing started in background.",
         "batch_id": batch_id,
         "status": "processing",
         "check_status_url": f"/api/v1/batch-analysis-status/{batch_id}"
@@ -331,8 +365,108 @@ async def get_batch_results(batch_id: str, session: Session = Depends(get_sessio
             {
                 "record_id": r.record_id,
                 "conditions": r.suspected_conditions,
-                "medications": r.recommended_medications,
+        "medications": r.recommended_medications,
                 "confidence": r.confidence_level
             } for r in results
         ]
     }
+
+@app.get("/api/v1/batches")
+async def list_batches(session: Session = Depends(get_session)):
+    """Return all batch runs, newest first"""
+    statement = select(BatchStatus).order_by(BatchStatus.id.desc()).limit(20)
+    batches = session.exec(statement).all()
+    return [
+        {
+            "batch_id": b.batch_id,
+            "status": b.status,
+            "total_records": b.total_records,
+            "processed_records": b.processed_records,
+            "errors": b.errors or [],
+            "created_at": b.created_at,
+            "completed_at": b.completed_at,
+        }
+        for b in batches
+    ]
+
+# ─── Dashboard Stats ─────────────────────────────────────────────────────────
+
+@app.get("/api/v1/stats")
+async def get_stats(session: Session = Depends(get_session)):
+    """Return real-time dashboard statistics from the database."""
+    today_start = datetime.combine(date.today(), datetime.min.time())
+
+    total_patients = session.exec(select(func.count(Patient.id))).one()
+    analyses_today = session.exec(
+        select(func.count(Analysis.id)).where(Analysis.analysis_date >= today_start)
+    ).one()
+    reports_generated = session.exec(select(func.count(DoctorReport.id))).one()
+
+    return {
+        "total_patients": total_patients,
+        "analyses_today": analyses_today,
+        "reports_generated": reports_generated,
+    }
+
+
+@app.get("/api/v1/recent-activity")
+async def get_recent_activity(
+    limit: int = Query(default=5, le=20),
+    session: Session = Depends(get_session),
+):
+    """Return the most recent analyses with patient name for the dashboard activity feed."""
+    statement = (
+        select(Analysis, MedicalRecord, Patient)
+        .join(MedicalRecord, Analysis.record_id == MedicalRecord.id)
+        .join(Patient, MedicalRecord.patient_id == Patient.patient_id)
+        .order_by(Analysis.analysis_date.desc())
+        .limit(limit)
+    )
+    rows = session.exec(statement).all()
+
+    return [
+        {
+            "analysis_id": analysis.id,
+            "patient_id": patient.patient_id,
+            "patient_name": patient.name,
+            "analysis_date": analysis.analysis_date.isoformat(),
+            "confidence_level": analysis.confidence_level,
+            "top_condition": analysis.suspected_conditions[0] if analysis.suspected_conditions else "—",
+        }
+        for analysis, record, patient in rows
+    ]
+
+
+# ─── Patient Search ───────────────────────────────────────────────────────────
+
+@app.get("/api/v1/patients/search")
+async def search_patients(
+    q: str = Query(..., min_length=1, description="Name or patient_id prefix to search"),
+    limit: int = Query(default=10, le=50),
+    session: Session = Depends(get_session),
+):
+    """Search patients by name (partial) or exact patient_id for the autocomplete flow."""
+    statement = (
+        select(Patient)
+        .where(
+            (Patient.name.ilike(f"%{q}%")) |  # type: ignore[operator]
+            (Patient.patient_id == q)
+        )
+        .limit(limit)
+    )
+    patients = session.exec(statement).all()
+
+    return [
+        {
+            "patient_id": p.patient_id,
+            "name": p.name,
+            "age": p.age,
+            "gender": p.gender,
+            "weight": p.weight,
+            "height": p.height,
+            "medical_history": p.medical_history,
+            "allergies": p.allergies,
+            "current_medications": p.current_medications,
+        }
+        for p in patients
+    ]

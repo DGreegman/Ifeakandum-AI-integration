@@ -1,0 +1,6 @@
+patient_id,name,age,gender,symptoms,severity,temperature,heart_rate,medical_history,additional_notes
+PT-B3-001,Emeka Okonkwo,67,Male,"Sudden slurred speech,facial drooping,left arm weakness",Critical,36.9,98,"Hypertension,Atrial fibrillation","Symptoms started abruptly 1 hour ago. On warfarin. Last INR not checked. Suspected ischaemic stroke."
+PT-B3-002,Amina Yusuf,22,Female,"Severe lower abdominal cramps,heavy menstrual bleeding,dizziness",Moderate,36.6,110,,"Menorrhagia episode. Soaking more than one pad per hour. No prior gynaecological history."
+PT-B3-003,Babatunde Adeyemi,55,Male,"Increased thirst,frequent urination,blurred vision,slow-healing foot wound",Moderate,37.3,84,"Diabetes Type 2,Peripheral neuropathy","Random blood glucose at home: 18 mmol/L. Foot wound present for 2 weeks, not improving."
+PT-B3-004,Chidinma Obi,38,Female,"Severe sore throat,high fever,difficulty swallowing,swollen neck glands",Severe,39.4,105,,"Symptoms for 4 days, worsening. Cannot swallow solids. Drooling noted. Tonsils markedly enlarged with white patches."
+PT-B3-005,Musa Garba,48,Male,"Recurring epigastric pain,nausea,dark tarry stools,vomiting blood",Severe,37.1,118,"Peptic ulcer disease,NSAID use","Pain worse after meals. Melaena for 2 days. Takes diclofenac daily for back pain. No proton pump inhibitor."

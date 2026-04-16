@@ -1,0 +1,176 @@
+[
+  {
+    "patient_info": {
+      "patient_id": "PT-DEMO-001",
+      "name": "Chioma Obi",
+      "age": 27,
+      "gender": "Female",
+      "weight": 58.0,
+      "height": 163.0,
+      "medical_history": [],
+      "allergies": [],
+      "current_medications": []
+    },
+    "symptoms": {
+      "primary_symptoms": ["Fever", "Chills", "Severe headache"],
+      "secondary_symptoms": ["Nausea", "Muscle aches", "Fatigue"],
+      "symptom_duration": "4 days",
+      "severity": "Moderate"
+    },
+    "vital_signs": {
+      "temperature": 39.2,
+      "blood_pressure": "100/65",
+      "heart_rate": 108,
+      "respiratory_rate": 20,
+      "oxygen_saturation": 97.0
+    },
+    "lab_results": {
+      "Malaria RDT": "Positive (P. falciparum)",
+      "Haemoglobin": "10.2 g/dL",
+      "WBC": "3,800 cells/µL"
+    },
+    "additional_notes": "Patient returned from rural Benue State 1 week ago. No antimalarial prophylaxis taken. No prior malaria history. Lives near stagnant water source."
+  },
+  {
+    "patient_info": {
+      "patient_id": "PT-DEMO-002",
+      "name": "Tunde Adeleke",
+      "age": 19,
+      "gender": "Male",
+      "weight": 70.0,
+      "height": 178.0,
+      "medical_history": [],
+      "allergies": ["Ibuprofen"],
+      "current_medications": []
+    },
+    "symptoms": {
+      "primary_symptoms": ["Right lower abdominal pain", "Nausea", "Vomiting"],
+      "secondary_symptoms": ["Loss of appetite", "Low-grade fever", "Abdominal rigidity"],
+      "symptom_duration": "18 hours",
+      "severity": "Severe"
+    },
+    "vital_signs": {
+      "temperature": 38.4,
+      "blood_pressure": "118/76",
+      "heart_rate": 99,
+      "respiratory_rate": 18,
+      "oxygen_saturation": 98.0
+    },
+    "lab_results": {
+      "WBC": "14,500 cells/µL",
+      "Neutrophils": "82%",
+      "CRP": "88 mg/L",
+      "Urinalysis": "Normal"
+    },
+    "additional_notes": "Pain started as diffuse periumbilical discomfort and migrated to the right iliac fossa over 12 hours. Positive Rovsing's sign. Rebound tenderness present. Ultrasound shows non-compressible appendix 9mm diameter. Allergic to ibuprofen — avoid NSAIDs."
+  },
+  {
+    "patient_info": {
+      "patient_id": "PT-DEMO-003",
+      "name": "Hauwa Ibrahim",
+      "age": 33,
+      "gender": "Female",
+      "weight": 72.0,
+      "height": 160.0,
+      "medical_history": ["Type 1 Diabetes Mellitus", "Hypothyroidism"],
+      "allergies": ["Sulfonamides"],
+      "current_medications": ["Insulin glargine 20 units nocte", "Levothyroxine 50mcg daily"]
+    },
+    "symptoms": {
+      "primary_symptoms": ["Excessive thirst", "Frequent urination", "Vomiting"],
+      "secondary_symptoms": ["Abdominal pain", "Fruity breath odour", "Confusion", "Generalised weakness"],
+      "symptom_duration": "2 days",
+      "severity": "Critical"
+    },
+    "vital_signs": {
+      "temperature": 37.1,
+      "blood_pressure": "95/60",
+      "heart_rate": 122,
+      "respiratory_rate": 26,
+      "oxygen_saturation": 98.0
+    },
+    "lab_results": {
+      "Blood Glucose": "24 mmol/L",
+      "Urine Ketones": "+++",
+      "Blood Ketones": "4.8 mmol/L",
+      "Serum Bicarbonate": "10 mEq/L",
+      "Serum Potassium": "5.8 mEq/L",
+      "Serum Sodium": "132 mEq/L",
+      "pH (arterial)": "7.18",
+      "Creatinine": "1.4 mg/dL"
+    },
+    "additional_notes": "Patient missed insulin doses for 3 days due to gastroenteritis. On presentation she was confused and Kussmaul breathing was noted. GCS 13/15. Sulfonamide allergy documented."
+  },
+  {
+    "patient_info": {
+      "patient_id": "PT-DEMO-004",
+      "name": "Emeka Nze",
+      "age": 58,
+      "gender": "Male",
+      "weight": 90.0,
+      "height": 174.0,
+      "medical_history": ["Hypertension", "Chronic Kidney Disease Stage 3", "Dyslipidaemia"],
+      "allergies": ["ACE Inhibitors (causes angioedema)"],
+      "current_medications": ["Amlodipine 5mg daily", "Atorvastatin 40mg nocte"]
+    },
+    "symptoms": {
+      "primary_symptoms": ["Severe throbbing headache", "Blurred vision", "Dizziness"],
+      "secondary_symptoms": ["Chest tightness", "Epistaxis", "Nausea"],
+      "symptom_duration": "6 hours",
+      "severity": "Critical"
+    },
+    "vital_signs": {
+      "temperature": 37.0,
+      "blood_pressure": "195/118",
+      "heart_rate": 90,
+      "respiratory_rate": 16,
+      "oxygen_saturation": 96.0
+    },
+    "lab_results": {
+      "Serum Creatinine": "2.1 mg/dL",
+      "eGFR": "34 mL/min/1.73m²",
+      "Serum Potassium": "4.2 mEq/L",
+      "Troponin I": "Negative",
+      "ECG": "Left ventricular hypertrophy pattern",
+      "Urine Protein": "2+"
+    },
+    "additional_notes": "Patient self-discontinued antihypertensive medication 2 weeks ago citing side effects. ACE inhibitors contraindicated due to prior angioedema episode. CKD limits aggressive diuresis. Fundoscopy shows grade III hypertensive retinopathy."
+  },
+  {
+    "patient_info": {
+      "patient_id": "PT-DEMO-005",
+      "name": "Grace Okoro",
+      "age": 71,
+      "gender": "Female",
+      "weight": 62.0,
+      "height": 158.0,
+      "medical_history": ["Asthma (mild persistent)", "Osteoporosis", "Type 2 Diabetes Mellitus"],
+      "allergies": ["Penicillin (rash)", "Aspirin (bronchoconstriction)"],
+      "current_medications": ["Salbutamol inhaler 100mcg PRN", "Beclomethasone inhaler 200mcg BD", "Metformin 500mg BD", "Alendronate 70mg weekly"]
+    },
+    "symptoms": {
+      "primary_symptoms": ["Productive cough with yellow-green sputum", "High fever", "Shortness of breath at rest"],
+      "secondary_symptoms": ["Right-sided pleuritic chest pain", "Fatigue", "Decreased appetite", "Night sweats"],
+      "symptom_duration": "5 days",
+      "severity": "Severe"
+    },
+    "vital_signs": {
+      "temperature": 38.9,
+      "blood_pressure": "130/80",
+      "heart_rate": 104,
+      "respiratory_rate": 28,
+      "oxygen_saturation": 91.0
+    },
+    "lab_results": {
+      "WBC": "17,200 cells/µL",
+      "Neutrophils": "85%",
+      "CRP": "142 mg/L",
+      "Procalcitonin": "1.8 ng/mL",
+      "Blood Glucose": "9.4 mmol/L",
+      "Chest X-Ray": "Right lower lobe consolidation",
+      "Sputum Gram Stain": "Gram-positive diplococci",
+      "Blood Culture": "Pending"
+    },
+    "additional_notes": "CURB-65 score: 3 (age ≥65, urea pending, RR 28, BP normal, confusion absent). Requires hospital admission. Penicillin allergy (rash) — avoid amoxicillin and co-amoxiclav. Aspirin causes bronchoconstriction. On inhaled steroids — monitor for fungal superinfection."
+  }
+]

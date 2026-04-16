@@ -65,22 +65,6 @@ class DoctorReport(BaseModel):
     generated_date: datetime
 
 
-class BatchAnalysisRequest(BaseModel):
-    batch_id: str
-    total_records: int
-    processed_records: int = 0
-    status: str = "processing"  # processing, completed, failed, partial
-    results: List[Dict[str, Any]] = []
-    errors: List[str] = []
-    created_at: datetime
-    completed_at: Optional[datetime] = None
-
-class CSVAnalysisResult(BaseModel):
-    batch_id: str
-    total_records: int
-    successful_analyses: int
-    failed_analyses: int
-    analysis_summary: Dict[str, Any]
-    detailed_results: List[Dict[str, Any]]
-    processing_time: float
-    recommendations: List[str]
+# BatchAnalysisRequest and CSVAnalysisResult were removed — they duplicated the
+# BatchStatus SQLModel in models.py and were never imported anywhere.
+# Use BatchStatus directly for all batch-status responses.

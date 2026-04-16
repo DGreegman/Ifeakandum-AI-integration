@@ -87,3 +87,30 @@ export interface DoctorReport {
     follow_up_recommendations: string[];
     generated_date: string;
 }
+
+export interface DashboardStats {
+    total_patients: number;
+    analyses_today: number;
+    reports_generated: number;
+}
+
+export interface RecentActivity {
+    analysis_id: number;
+    patient_id: string;
+    patient_name: string;
+    analysis_date: string;
+    confidence_level: string;
+    top_condition: string;
+}
+
+export interface PatientSearchResult {
+    patient_id: string;
+    name: string;
+    age: number;
+    gender: string;
+    weight?: number;
+    height?: number;
+    medical_history: string[];
+    allergies: string[];
+    current_medications: string[];
+}

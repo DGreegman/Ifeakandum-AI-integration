@@ -3,9 +3,10 @@ from typing import Dict, Any, List
 from datetime import datetime
 from celery import shared_task
 from sqlmodel import Session, select
+from sqlalchemy import update as sa_update
 from src.database import engine
 from src.models import MedicalRecord, Analysis, BatchStatus
-from src.services.patient_service import deepseek_client
+from src.services.patient_service import openai_client
 import logging
 
 logger = logging.getLogger(__name__)
@@ -30,57 +31,37 @@ def analyze_medical_record_task(self, record_id: int, batch_id: str = None):
             return
 
         try:
-            # Perform AI Analysis (running async code in sync worker)
-            # We recreate a simple schema object for the client
-            from src.schema.patient_schema import MedicalRecords as SchemaRecord
-            # Convert DB model to SchemaRecord (simplified)
-            # Note: This is an architectural shortcut for the task
-            
-            # Use the existing deepseek_client.analyze_medical_record
-            # But the client expects a MedicalRecords schema object
-            # For simplicity, let's just extract what we need or pass the dict
-            
-            # For now, let's assume we can pass the record data
-            # Or refactor patient_service to handle different inputs.
-            # To keep it simple, I'll manually call the client's internal logic
-            # or wrap the record back into the schema.
-            
-            # Import here to avoid circular dependencies
-            from src.schema.patient_schema import MedicalRecords as SchemaRecord, PatientInfo, Symptoms, VitalSigns
-            
-            schema_record = SchemaRecord(
-                patient_info=PatientInfo(
-                    patient_id=record.patient.patient_id,
-                    name=record.patient.name,
-                    age=record.patient.age,
-                    gender=record.patient.gender,
-                    weight=record.patient.weight,
-                    height=record.patient.height,
-                    medical_history=record.patient.medical_history,
-                    allergies=record.patient.allergies,
-                    current_medications=record.patient.current_medications
-                ),
-                symptoms=Symptoms(
-                    primary_symptoms=record.primary_symptoms,
-                    secondary_symptoms=record.secondary_symptoms,
-                    symptom_duration=record.symptom_duration,
-                    severity=record.severity
-                ),
-                vital_signs=VitalSigns(
-                    temperature=record.temperature,
-                    blood_pressure=record.blood_pressure,
-                    heart_rate=record.heart_rate,
-                    respiratory_rate=record.respiratory_rate,
-                    oxygen_saturation=record.oxygen_saturation
-                ),
-                lab_results=record.lab_results,
-                additional_notes=record.additional_notes
-            )
+            # Build a plain dict — no Pydantic schema reconstruction needed
+            record_data = {
+                "patient_id": record.patient.patient_id,
+                "age": record.patient.age,
+                "gender": record.patient.gender,
+                "weight": record.patient.weight,
+                "height": record.patient.height,
+                "medical_history": record.patient.medical_history,
+                "allergies": record.patient.allergies,
+                "current_medications": record.patient.current_medications,
+                "primary_symptoms": record.primary_symptoms,
+                "secondary_symptoms": record.secondary_symptoms,
+                "symptom_duration": record.symptom_duration,
+                "severity": record.severity,
+                "vital_signs": {
+                    "temperature": record.temperature,
+                    "blood_pressure": record.blood_pressure,
+                    "heart_rate": record.heart_rate,
+                    "respiratory_rate": record.respiratory_rate,
+                    "oxygen_saturation": record.oxygen_saturation,
+                },
+                "lab_results": record.lab_results,
+                "additional_notes": record.additional_notes,
+            }
 
-            # Re-running the async analysis (this requires an event loop in the thread)
+            # Run the async AI call in a fresh event loop (Celery workers are sync)
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            ai_analysis = loop.run_until_complete(deepseek_client.analyze_medical_record(schema_record))
+            ai_analysis = loop.run_until_complete(
+                openai_client.analyze_medical_record_from_dict(record_data)
+            )
             loop.close()
 
             # Save Analysis to DB
@@ -97,19 +78,27 @@ def analyze_medical_record_task(self, record_id: int, batch_id: str = None):
             session.add(analysis)
             session.commit()
             
-            # Update Batch Progress if applicable
+            # Update Batch Progress atomically to prevent race conditions between
+            # concurrent workers (avoids read-modify-write on processed_records)
             if batch_id:
                 with Session(engine) as update_session:
-                    # Increment only once on success
-                    batch = update_session.exec(select(BatchStatus).where(BatchStatus.batch_id == batch_id)).first()
-                    if batch:
-                        batch.processed_records += 1
-                        if batch.processed_records >= batch.total_records:
-                            batch.status = "completed"
-                            batch.completed_at = datetime.now()
+                    update_session.exec(
+                        sa_update(BatchStatus)
+                        .where(BatchStatus.batch_id == batch_id)
+                        .values(processed_records=BatchStatus.processed_records + 1)
+                    )
+                    update_session.commit()
+
+                    # Re-fetch to check completion threshold
+                    batch = update_session.exec(
+                        select(BatchStatus).where(BatchStatus.batch_id == batch_id)
+                    ).first()
+                    if batch and batch.processed_records >= batch.total_records:
+                        batch.status = "completed"
+                        batch.completed_at = datetime.now()
                         update_session.add(batch)
                         update_session.commit()
-                        logger.info(f"Batch {batch_id} progress: {batch.processed_records}/{batch.total_records}")
+                    logger.info(f"Batch {batch_id} progress: {batch.processed_records}/{batch.total_records}")
             
             return {"status": "success", "record_id": record_id}
 
@@ -127,12 +116,21 @@ def analyze_medical_record_task(self, record_id: int, batch_id: str = None):
             logger.error(f"Task {record_id} failed after {self.max_retries} retries.")
             if batch_id:
                 with Session(engine) as update_session:
-                    batch = update_session.exec(select(BatchStatus).where(BatchStatus.batch_id == batch_id)).first()
+                    # Atomically increment counter and record error
+                    update_session.exec(
+                        sa_update(BatchStatus)
+                        .where(BatchStatus.batch_id == batch_id)
+                        .values(processed_records=BatchStatus.processed_records + 1)
+                    )
+                    update_session.commit()
+
+                    batch = update_session.exec(
+                        select(BatchStatus).where(BatchStatus.batch_id == batch_id)
+                    ).first()
                     if batch:
                         current_errors = list(batch.errors)
                         current_errors.append(error_msg)
                         batch.errors = current_errors
-                        batch.processed_records += 1
                         if batch.processed_records >= batch.total_records:
                             batch.status = "completed"
                             batch.completed_at = datetime.now()

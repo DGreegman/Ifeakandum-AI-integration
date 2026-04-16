@@ -1,0 +1,36 @@
+You are reviewing a patient's clinical presentation. Your task is ONLY to identify suspected conditions and risk factors.
+Do NOT recommend medications — that is handled separately.
+
+PATIENT PROFILE
+---------------
+Age: {{ age }} years | Gender: {{ gender }} | Weight: {{ weight }}kg
+Medical History: {{ medical_history | join(', ') if medical_history else 'None' }}
+Known Allergies: {{ allergies | join(', ') if allergies else 'None' }}
+Current Medications: {{ current_medications | join(', ') if current_medications else 'None' }}
+
+PRESENTING SYMPTOMS
+-------------------
+Primary:   {{ primary_symptoms | join(', ') }}
+Secondary: {{ secondary_symptoms | join(', ') if secondary_symptoms else 'None' }}
+Duration:  {{ duration or 'Not specified' }}
+Severity:  {{ severity or 'Not specified' }}
+
+VITAL SIGNS
+-----------
+Temperature:       {{ temperature or 'Not recorded' }}°C
+Blood Pressure:    {{ blood_pressure or 'Not recorded' }}
+Heart Rate:        {{ heart_rate or 'Not recorded' }} bpm
+Respiratory Rate:  {{ respiratory_rate or 'Not recorded' }} breaths/min
+Oxygen Saturation: {{ oxygen_saturation or 'Not recorded' }}%
+
+LAB RESULTS
+-----------
+{{ lab_results if lab_results else 'None provided' }}
+
+Based on the above, respond with ONLY this JSON:
+{
+    "suspected_conditions": ["condition1", "condition2"],
+    "risk_factors": ["risk1", "risk2"],
+    "confidence_level": "high",
+    "clinical_reasoning": "Brief clinical reasoning connecting symptoms to conditions"
+}
