@@ -128,12 +128,31 @@ export const BatchUpload = () => {
         );
     };
 
+    const URGENCY_STYLES: Record<string, string> = {
+        Critical: 'bg-red-50 text-red-700 ring-red-600/20',
+        Severe:   'bg-orange-50 text-orange-700 ring-orange-600/20',
+        Moderate: 'bg-yellow-50 text-yellow-800 ring-yellow-600/20',
+        Low:      'bg-green-50 text-green-700 ring-green-600/20',
+        Unknown:  'bg-gray-50 text-gray-600 ring-gray-500/20',
+    };
+
+    const UrgencyBadge = ({ level }: { level?: string }) => {
+        const label = level ?? 'Unknown';
+        const cls = URGENCY_STYLES[label] ?? URGENCY_STYLES['Unknown'];
+        return (
+            <span className={clsx('inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset', cls)}>
+                {label}
+            </span>
+        );
+    };
+
     const ResultsTable = ({ results }: { results: BatchResult['results'] }) => (
         <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-300">
                 <thead className="bg-gray-50">
                     <tr>
                         <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">Record</th>
+                        <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Priority</th>
                         <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Conditions</th>
                         <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Confidence</th>
                         <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Medications</th>
@@ -144,6 +163,9 @@ export const BatchUpload = () => {
                         <tr key={result.record_id ?? idx}>
                             <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
                                 #{idx + 1}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-4 text-sm">
+                                <UrgencyBadge level={result.urgency_level} />
                             </td>
                             <td className="px-3 py-4 text-sm text-gray-500">
                                 {(result.conditions ?? []).slice(0, 2).join(', ')}

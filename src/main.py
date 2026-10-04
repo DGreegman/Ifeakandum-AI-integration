@@ -12,12 +12,20 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from sqlmodel import Session, select, func
 
 from src.database import init_db, engine, get_session
-from src.models import Patient, MedicalRecord, Analysis, BatchStatus, DoctorReport, WHOData
+from src.models import Patient, MedicalRecord, Analysis, BatchStatus, DoctorReport, WHOData, User
 from src.services.batch_analysis import process_csv_in_chunks
 from src.tasks import analyze_medical_record_task
 from src.schema.patient_schema import AnalysisResult, MedicalRecords, MedicationRecommendation, DoctorReport as DoctorReportSchema
+from src.schema.user_schema import UserRegister, UserLogin, UserOut, TokenResponse
 from src.services.patient_service import openai_client, logger
 from src.middleware import log_request
+from src.auth import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    get_current_user,
+    require_role,
+)
 
 load_dotenv()
 
@@ -53,15 +61,133 @@ app.add_middleware(
 )
 app.add_middleware(BaseHTTPMiddleware, dispatch=log_request)
 
+
+# ─── Auth Endpoints ───────────────────────────────────────────────────────────
+
+@app.post("/api/v1/auth/register", response_model=TokenResponse, status_code=201, tags=["auth"])
+async def register(body: UserRegister, session: Session = Depends(get_session)):
+    """
+    Register the very first user (who becomes admin automatically).
+    Once any user exists, only admins can create additional accounts via POST /auth/users.
+    """
+    user_count = session.exec(select(func.count(User.id))).one()
+    if user_count > 0:
+        raise HTTPException(
+            status_code=403,
+            detail="Registration is closed. Ask an admin to create your account via /auth/users.",
+        )
+
+    existing = session.exec(
+        select(User).where((User.email == body.email) | (User.username == body.username))
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email or username already taken.")
+
+    user = User(
+        email=body.email,
+        username=body.username,
+        hashed_password=hash_password(body.password),
+        role="admin",  # first user is always admin
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+
+    token = create_access_token(user.id, user.role)
+    return TokenResponse(access_token=token, user=UserOut.from_orm(user))
+
+
+@app.post("/api/v1/auth/users", response_model=UserOut, status_code=201, tags=["auth"])
+async def create_user(
+    body: UserRegister,
+    session: Session = Depends(get_session),
+    _: User = Depends(require_role("admin")),
+):
+    """Admin-only: create a new user with any role."""
+    if body.role not in ("admin", "doctor", "viewer"):
+        raise HTTPException(status_code=400, detail="Role must be admin, doctor, or viewer.")
+
+    existing = session.exec(
+        select(User).where((User.email == body.email) | (User.username == body.username))
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email or username already taken.")
+
+    user = User(
+        email=body.email,
+        username=body.username,
+        hashed_password=hash_password(body.password),
+        role=body.role,
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return UserOut.from_orm(user)
+
+
+@app.post("/api/v1/auth/login", response_model=TokenResponse, tags=["auth"])
+async def login(body: UserLogin, session: Session = Depends(get_session)):
+    """Exchange email + password for a JWT access token."""
+    user = session.exec(select(User).where(User.email == body.email)).first()
+    if not user or not verify_password(body.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account is disabled. Contact an admin.")
+
+    token = create_access_token(user.id, user.role)
+    return TokenResponse(access_token=token, user=UserOut.from_orm(user))
+
+
+@app.get("/api/v1/auth/me", response_model=UserOut, tags=["auth"])
+async def get_me(current_user: User = Depends(get_current_user)):
+    """Return the currently authenticated user's profile."""
+    return UserOut.from_orm(current_user)
+
+
+@app.get("/api/v1/auth/users", response_model=List[UserOut], tags=["auth"])
+async def list_users(
+    session: Session = Depends(get_session),
+    _: User = Depends(require_role("admin")),
+):
+    """Admin-only: list all registered users."""
+    users = session.exec(select(User).order_by(User.created_at.desc())).all()
+    return [UserOut.from_orm(u) for u in users]
+
+
+@app.patch("/api/v1/auth/users/{user_id}/deactivate", response_model=UserOut, tags=["auth"])
+async def deactivate_user(
+    user_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_role("admin")),
+):
+    """Admin-only: deactivate a user account (prevents login without deleting data)."""
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own account.")
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    user.is_active = False
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return UserOut.from_orm(user)
+
+
+# ─── Medical Analysis Endpoints ───────────────────────────────────────────────
+
 @app.post("/api/v1/analyze-record", response_model=AnalysisResult)
-async def analyze_medical_record(record: MedicalRecords, session: Session = Depends(get_session)):
+async def analyze_medical_record(
+    record: MedicalRecords,
+    session: Session = Depends(get_session),
+    _: User = Depends(require_role("admin", "doctor")),
+):
     """Analyze patient medical record and provide medication recommendations"""
     try:
         # 1. Get or Create Patient
         p_info = record.patient_info
         statement = select(Patient).where(Patient.patient_id == p_info.patient_id)
         patient = session.exec(statement).first()
-        
+
         if not patient:
             patient = Patient(
                 patient_id=p_info.patient_id,
@@ -97,8 +223,7 @@ async def analyze_medical_record(record: MedicalRecords, session: Session = Depe
         session.commit()
         session.refresh(db_record)
 
-        # 3. Perform AI Analysis (Sync call for single record for simplicity, or queue task)
-        # For single record, we'll wait for the AI result
+        # 3. Perform AI Analysis
         ai_analysis = await openai_client.analyze_medical_record(record)
 
         # 4. Save Analysis Result
@@ -112,7 +237,7 @@ async def analyze_medical_record(record: MedicalRecords, session: Session = Depe
             treatment_notes=ai_analysis["treatment_notes"],
             confidence_level=ai_analysis["confidence_level"]
         )
-        
+
         db_analysis = Analysis(
             record_id=db_record.id,
             suspected_conditions=analysis_result.suspected_conditions,
@@ -124,12 +249,13 @@ async def analyze_medical_record(record: MedicalRecords, session: Session = Depe
         )
         session.add(db_analysis)
         session.commit()
-        
+
         return analysis_result
-        
+
     except Exception as e:
         logger.error(f"Analysis error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/v1/analysis-result/{patient_id}", response_model=List[AnalysisResult])
 async def get_analysis_result(
@@ -137,6 +263,7 @@ async def get_analysis_result(
     limit: int = Query(default=20, le=100, description="Max records to return (cap 100)"),
     offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     session: Session = Depends(get_session),
+    _: User = Depends(get_current_user),
 ):
     """Get analysis results for a patient (paginated)"""
     statement = (
@@ -147,7 +274,7 @@ async def get_analysis_result(
         .limit(limit)
     )
     results = session.exec(statement).all()
-    
+
     if not results:
         raise HTTPException(status_code=404, detail="Analysis results not found")
 
@@ -164,19 +291,20 @@ async def get_analysis_result(
         ) for r in results
     ]
 
-# Legacy Endpoints Refactored to use Persistent DB
 
 @app.post("/api/v1/doctor-report", response_model=DoctorReportSchema)
-async def create_doctor_report(report_in: DoctorReportSchema, session: Session = Depends(get_session)):
+async def create_doctor_report(
+    report_in: DoctorReportSchema,
+    session: Session = Depends(get_session),
+    _: User = Depends(require_role("admin", "doctor")),
+):
     """Generate professional doctor report and persist to DB"""
     try:
-        # Check if patient exists
         patient_stmt = select(Patient).where(Patient.patient_id == report_in.patient_id)
         patient = session.exec(patient_stmt).first()
         if not patient:
             raise HTTPException(status_code=404, detail="Patient not found")
 
-        # Save to DB
         db_report = DoctorReport(
             report_id=report_in.report_id or str(uuid.uuid4()),
             patient_id=report_in.patient_id,
@@ -205,25 +333,28 @@ async def create_doctor_report(report_in: DoctorReportSchema, session: Session =
         logger.error(f"Doctor report error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/v1/upload-who-data")
-async def upload_who_data(file: UploadFile = File(...), session: Session = Depends(get_session)):
-    """Upload WHO health data (CSV) and persist to DB"""
+async def upload_who_data(
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+    _: User = Depends(require_role("admin")),
+):
+    """Admin-only: upload WHO health data (CSV) and persist to DB"""
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Only CSV files are supported")
-    
+
     try:
         import pandas as pd
         content = await file.read()
         df = pd.read_csv(io.BytesIO(content))
-        
-        # Expect specific WHO columns (demo implementation)
+
         required_cols = ['Indicator', 'Value', 'Year']
         df.columns = df.columns.str.strip()
-        
+
         if not all(col in df.columns for col in required_cols):
-            # If not WHO format, just store with some defaults
             logger.warning("Uploaded CSV does not match WHO indicator format. Using fallback parsing.")
-        
+
         records_added = 0
         for _, row in df.iterrows():
             who_record = WHOData(
@@ -236,9 +367,9 @@ async def upload_who_data(file: UploadFile = File(...), session: Session = Depen
             )
             session.add(who_record)
             records_added += 1
-            
+
         session.commit()
-        
+
         return {
             "status": "success",
             "message": f"Successfully processed {records_added} WHO data records",
@@ -248,15 +379,21 @@ async def upload_who_data(file: UploadFile = File(...), session: Session = Depen
         logger.error(f"WHO data upload error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/v1/batch-analysis-download/{batch_id}")
-async def download_batch_results(batch_id: str, fmt: str = "json", session: Session = Depends(get_session)):
+async def download_batch_results(
+    batch_id: str,
+    fmt: str = "json",
+    session: Session = Depends(get_session),
+    _: User = Depends(get_current_user),
+):
     """Download batch analysis results as JSON or CSV"""
     statement = select(Analysis).where(Analysis.batch_id == batch_id)
     results = session.exec(statement).all()
-    
+
     if not results:
         raise HTTPException(status_code=404, detail="Batch results not found")
-    
+
     data = [
         {
             "record_id": r.record_id,
@@ -267,21 +404,22 @@ async def download_batch_results(batch_id: str, fmt: str = "json", session: Sess
             "treatment_notes": r.treatment_notes
         } for r in results
     ]
-    
+
     if fmt == "csv":
         import pandas as pd
         df = pd.DataFrame(data)
         stream = io.StringIO()
         df.to_csv(stream, index=False)
-        
+
         from fastapi.responses import StreamingResponse
         return StreamingResponse(
             iter([stream.getvalue()]),
             media_type="text/csv",
             headers={"Content-Disposition": f"attachment; filename=batch_{batch_id}_results.csv"}
         )
-    
+
     return data
+
 
 @app.get("/api/v1/doctor-reports/{patient_id}")
 async def get_doctor_reports(
@@ -289,6 +427,7 @@ async def get_doctor_reports(
     limit: int = Query(default=20, le=100, description="Max records to return (cap 100)"),
     offset: int = Query(default=0, ge=0, description="Number of records to skip"),
     session: Session = Depends(get_session),
+    _: User = Depends(get_current_user),
 ):
     """Get doctor reports for a patient (paginated)"""
     statement = (
@@ -300,10 +439,12 @@ async def get_doctor_reports(
     reports = session.exec(statement).all()
     return reports
 
+
 @app.post("/api/v1/upload-analyze-csv")
 async def upload_and_analyze_csv(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    _: User = Depends(require_role("admin", "doctor")),
 ):
     """Upload CSV or JSON file and analyze medical data with background processing"""
     if not file.filename.endswith(('.csv', '.json')):
@@ -312,9 +453,6 @@ async def upload_and_analyze_csv(
     content = await file.read()
     batch_id = str(uuid.uuid4())
 
-    # Use FastAPI BackgroundTasks — safe in both sync and async contexts.
-    # asyncio.create_task() would silently drop the task when called outside a
-    # running event loop and is not the right primitive for route handlers.
     background_tasks.add_task(process_csv_in_chunks, content, batch_id, file.filename)
 
     return {
@@ -324,20 +462,22 @@ async def upload_and_analyze_csv(
         "check_status_url": f"/api/v1/batch-analysis-status/{batch_id}"
     }
 
+
 @app.get("/api/v1/batch-analysis-status/{batch_id}")
-async def get_batch_status(batch_id: str, session: Session = Depends(get_session)):
+async def get_batch_status(
+    batch_id: str,
+    session: Session = Depends(get_session),
+    _: User = Depends(get_current_user),
+):
     statement = select(BatchStatus).where(BatchStatus.batch_id == batch_id)
     batch = session.exec(statement).first()
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found")
-    
-    # Optional: Update processed_records dynamically for the response
+
     analysis_stmt = select(Analysis).where(Analysis.batch_id == batch_id)
     processed_count = len(session.exec(analysis_stmt).all())
-    
-    # If there are errors, they should also count as "processed"
     total_processed = processed_count + len(batch.errors)
-    
+
     return {
         "batch_id": batch.batch_id,
         "total_records": batch.total_records,
@@ -348,14 +488,46 @@ async def get_batch_status(batch_id: str, session: Session = Depends(get_session
         "completed_at": batch.completed_at
     }
 
+
 @app.get("/api/v1/batch-results/{batch_id}")
-async def get_batch_results(batch_id: str, session: Session = Depends(get_session)):
+async def get_batch_results(
+    batch_id: str,
+    session: Session = Depends(get_session),
+    _: User = Depends(get_current_user),
+):
     statement = select(Analysis).where(Analysis.batch_id == batch_id)
     results = session.exec(statement).all()
-    
+
     batch_stmt = select(BatchStatus).where(BatchStatus.batch_id == batch_id)
     batch = session.exec(batch_stmt).first()
-    
+
+    def _urgency_level(analysis: Analysis) -> str:
+        record = session.get(MedicalRecord, analysis.record_id)
+        if not record:
+            return "Unknown"
+
+        severity = (record.severity or "").lower().strip()
+
+        if severity == "critical":
+            return "Critical"
+        if severity == "severe":
+            return "Severe"
+        if severity == "moderate":
+            return "Moderate"
+
+        spo2 = record.oxygen_saturation
+        hr = record.heart_rate
+        if spo2 is not None and spo2 < 90:
+            return "Critical"
+        if (spo2 is not None and spo2 < 94) or (hr is not None and (hr > 120 or hr < 50)):
+            return "Severe"
+        if (spo2 is not None and spo2 < 96) or (hr is not None and hr > 100):
+            return "Moderate"
+        if severity == "mild":
+            return "Low"
+
+        return "Unknown"
+
     return {
         "batch_id": batch_id,
         "total_records": batch.total_records if batch else len(results),
@@ -365,14 +537,19 @@ async def get_batch_results(batch_id: str, session: Session = Depends(get_sessio
             {
                 "record_id": r.record_id,
                 "conditions": r.suspected_conditions,
-        "medications": r.recommended_medications,
-                "confidence": r.confidence_level
+                "medications": r.recommended_medications,
+                "confidence": r.confidence_level,
+                "urgency_level": _urgency_level(r),
             } for r in results
         ]
     }
 
+
 @app.get("/api/v1/batches")
-async def list_batches(session: Session = Depends(get_session)):
+async def list_batches(
+    session: Session = Depends(get_session),
+    _: User = Depends(get_current_user),
+):
     """Return all batch runs, newest first"""
     statement = select(BatchStatus).order_by(BatchStatus.id.desc()).limit(20)
     batches = session.exec(statement).all()
@@ -389,10 +566,14 @@ async def list_batches(session: Session = Depends(get_session)):
         for b in batches
     ]
 
-# ─── Dashboard Stats ─────────────────────────────────────────────────────────
+
+# ─── Dashboard Stats ──────────────────────────────────────────────────────────
 
 @app.get("/api/v1/stats")
-async def get_stats(session: Session = Depends(get_session)):
+async def get_stats(
+    session: Session = Depends(get_session),
+    _: User = Depends(get_current_user),
+):
     """Return real-time dashboard statistics from the database."""
     today_start = datetime.combine(date.today(), datetime.min.time())
 
@@ -413,6 +594,7 @@ async def get_stats(session: Session = Depends(get_session)):
 async def get_recent_activity(
     limit: int = Query(default=5, le=20),
     session: Session = Depends(get_session),
+    _: User = Depends(get_current_user),
 ):
     """Return the most recent analyses with patient name for the dashboard activity feed."""
     statement = (
@@ -444,6 +626,7 @@ async def search_patients(
     q: str = Query(..., min_length=1, description="Name or patient_id prefix to search"),
     limit: int = Query(default=10, le=50),
     session: Session = Depends(get_session),
+    _: User = Depends(get_current_user),
 ):
     """Search patients by name (partial) or exact patient_id for the autocomplete flow."""
     statement = (

@@ -75,6 +75,7 @@ export interface BatchResult {
         conditions: string[];
         medications: MedicationRecommendation[];
         confidence: string;
+        urgency_level?: string;
     }[];
 }
 

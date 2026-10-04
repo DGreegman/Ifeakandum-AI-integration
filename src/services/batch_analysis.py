@@ -10,6 +10,13 @@ from src.schema.patient_schema import PatientInfo, Symptoms, VitalSigns, Medical
 
 logger = logging.getLogger(__name__)
 
+TRADITIONAL_SEVERITY_MAP = {
+    "critical": 4,
+    "severe": 3,
+    "moderate": 2,
+    "mild": 1,
+}
+
 def validate_csv_columns(df: pd.DataFrame) -> Tuple[bool, List[str]]:
     """Validate if CSV has required medical columns or wearable device format"""
     # Simplified validation for demo/project purposes
@@ -22,6 +29,56 @@ def validate_csv_columns(df: pd.DataFrame) -> Tuple[bool, List[str]]:
         return True, ["wearable"]
     
     return False, ["Missing basic columns (age/gender or wearable data)"]
+
+
+def calculate_urgency_score(row: pd.Series, csv_type: str) -> int:
+    """Compute urgency score so critical/emergency rows are processed first."""
+    if csv_type == "traditional":
+        severity = str(row.get("severity", "")).strip().lower()
+        return TRADITIONAL_SEVERITY_MAP.get(severity, 0)
+
+    if csv_type == "wearable":
+        score = 0
+
+        if str(row.get("fall detection", "")).strip().lower() == "yes":
+            score += 3
+        if str(row.get("spo2 level alert", "")).strip().upper() == "ABNORMAL":
+            score += 3
+        if str(row.get("heart rate alert", "")).strip().upper() == "ABNORMAL":
+            score += 2
+        if str(row.get("blood pressure alert", "")).strip().upper() == "ABNORMAL":
+            score += 2
+        if str(row.get("temperature alert", "")).strip().upper() == "ABNORMAL":
+            score += 1
+
+        return score
+
+    return 0
+
+
+def sort_by_urgency(df: pd.DataFrame, csv_type: str) -> pd.DataFrame:
+    """Sort rows by urgency score descending, preserving deterministic tie ordering."""
+    scored_df = df.copy()
+    scored_df["__source_order"] = range(len(scored_df))
+    scored_df["__urgency_score"] = scored_df.apply(
+        lambda row: calculate_urgency_score(row, csv_type), axis=1
+    )
+
+    scored_df = scored_df.sort_values(
+        by=["__urgency_score", "__source_order"],
+        ascending=[False, True],
+        kind="mergesort",
+    ).reset_index(drop=True)
+
+    prioritized_count = int((scored_df["__urgency_score"] > 0).sum())
+    logger.info(
+        "Urgency prioritization applied for %s CSV: %s high-priority rows out of %s",
+        csv_type,
+        prioritized_count,
+        len(scored_df),
+    )
+
+    return scored_df.drop(columns=["__source_order", "__urgency_score"])
 
 def prepare_record_from_row(row: pd.Series, index: int, batch_id: str = "") -> MedicalRecords:
     """Helper to convert row to Schema object (logic borrowed from before)"""
@@ -75,6 +132,11 @@ def prepare_record_from_row(row: pd.Series, index: int, batch_id: str = "") -> M
             additional_notes=str(row.get('additional_notes', ''))
         )
 
+
+def prepare_medical_record_from_row(row: pd.Series, index: int, batch_id: str = "") -> MedicalRecords:
+    """Backward-compatible alias used by legacy test scripts."""
+    return prepare_record_from_row(row, index, batch_id)
+
 async def process_csv_in_chunks(file_content: bytes, batch_id: str, filename: str = ".csv"):
     """
     Process file sequentially, save to DB, and analyze inline using OpenAI
@@ -103,6 +165,13 @@ async def process_csv_in_chunks(file_content: bytes, batch_id: str, filename: st
     else:
         df = pd.read_csv(io.BytesIO(file_content))
         df.columns = df.columns.str.strip().str.lower()
+        is_valid, details = validate_csv_columns(df)
+        if not is_valid:
+            logger.error("Invalid CSV structure for batch %s: %s", batch_id, details)
+            return
+
+        csv_type = details[0]
+        df = sort_by_urgency(df, csv_type)
         total_records = len(df)
         records = None
     
